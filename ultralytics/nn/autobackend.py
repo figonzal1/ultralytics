@@ -301,39 +301,3 @@ class AutoBackend(nn.Module):
                 *imgsz, dtype=torch.half if self.fp16 else torch.float, device=self.device)  # input
             for _ in range(1):
                 self.forward(im)  # warmup
-
-    @staticmethod
-    def _model_type(p="path/to/model.pt"):
-        """
-        Takes a path to a model file and returns the model type. Possibles types are pt, jit, onnx, xml, engine, coreml,
-        saved_model, pb, tflite, edgetpu, tfjs, ncnn or paddle.
-
-        Args:
-            p: path to the model file. Defaults to path/to/model.pt
-
-        Examples:
-            >>> model = AutoBackend(weights="path/to/model.onnx")
-            >>> model_type = model._model_type()  # returns "onnx"
-        """
-        from ultralytics.engine.exporter import export_formats
-
-        sf = export_formats()["Suffix"]  # export suffixes
-        if not is_url(p) and not isinstance(p, str):
-            check_suffix(p, sf)  # checks
-        name = Path(p).name
-        types = [s in name for s in sf]
-        # retain support for older Apple CoreML *.mlmodel formats
-        types[5] |= name.endswith(".mlmodel")
-        types[8] &= not types[9]  # tflite &= not edgetpu
-        if any(types):
-            triton = False
-        else:
-            from urllib.parse import urlsplit
-
-            url = urlsplit(p)
-            triton = bool(url.netloc) and bool(
-                url.path) and url.scheme in {"http", "grpc"}
-
-        print(types + [triton])
-
-        return types + [triton]
