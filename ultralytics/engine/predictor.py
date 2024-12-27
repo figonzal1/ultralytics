@@ -340,11 +340,10 @@ class BasePredictor:
         # Add predictions to image
         if self.args.save or self.args.show:
             self.plotted_img = result.plot(
-                line_width=self.args.line_width,
+                line_width_percentage=self.args.line_width_percentage,
                 boxes=self.args.show_boxes,
                 conf=self.args.show_conf,
                 labels=self.args.show_labels,
-                im_gpu=None if self.args.retina_masks else im[i],
             )
 
         # Save results

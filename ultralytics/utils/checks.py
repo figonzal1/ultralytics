@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 import cv2
+from matplotlib import font_manager
 import numpy as np
 import requests
 import torch
@@ -301,6 +302,24 @@ def check_pip_update_available():
         except Exception:
             pass
     return False
+
+
+@ThreadingLocked()
+def load_custom_font(font):
+    script_dir = Path(__file__).parent
+    assets_dir = script_dir.parent / 'assets/fonts'
+    
+    # Check the same directory as the script
+    file = assets_dir / font
+    if file.exists():
+        return file
+
+    # Check system fonts as a fallback
+    matches = [s for s in font_manager.findSystemFonts() if font in s]
+    if any(matches):
+        return matches[0]
+
+    raise FileNotFoundError(f"Font '{font}' not found in script directory or system fonts.")
 
 
 @ThreadingLocked()

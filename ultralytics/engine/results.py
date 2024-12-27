@@ -198,7 +198,6 @@ class Results(SimpleClass):
         masks (Masks | None): Object containing detection masks.
         probs (Probs | None): Object containing class probabilities for classification tasks.
         keypoints (Keypoints | None): Object containing detected keypoints for each object.
-        obb (OBB | None): Object containing oriented bounding boxes.
         speed (Dict[str, float | None]): Dictionary of preprocess, inference, and postprocess speeds.
         names (Dict[int, str]): Dictionary mapping class IDs to class names.
         path (str): Path to the image file.
@@ -228,7 +227,7 @@ class Results(SimpleClass):
     """
 
     def __init__(
-        self, orig_img, path, names, boxes=None, masks=None, probs=None, keypoints=None, obb=None, speed=None
+        self, orig_img, path, names, boxes=None, masks=None, probs=None, keypoints=None, speed=None
     ) -> None:
         """
         Initialize the Results class for storing and manipulating inference results.
@@ -263,12 +262,11 @@ class Results(SimpleClass):
         self.masks = Masks(masks, self.orig_shape) if masks is not None else None  # native size or imgsz masks
         self.probs = Probs(probs) if probs is not None else None
         self.keypoints = Keypoints(keypoints, self.orig_shape) if keypoints is not None else None
-        self.obb = OBB(obb, self.orig_shape) if obb is not None else None
         self.speed = speed if speed is not None else {"preprocess": None, "inference": None, "postprocess": None}
         self.names = names
         self.path = path
         self.save_dir = None
-        self._keys = "boxes", "masks", "probs", "keypoints", "obb"
+        self._keys = "boxes", "masks", "probs", "keypoints",
 
     def __getitem__(self, idx):
         """
@@ -446,17 +444,13 @@ class Results(SimpleClass):
     def plot(
         self,
         conf=True,
-        line_width=None,
-        font_size=None,
-        font="Arial.ttf",
-        pil=False,
+        line_width_percentage=None,
+        font_percentage=None,
+        font="Montserrat-Medium.ttf",
+        pil=True,
         img=None,
-        im_gpu=None,
-        kpt_radius=5,
-        kpt_line=True,
         labels=True,
         boxes=True,
-        masks=True,
         probs=True,
         show=False,
         save=False,
@@ -499,46 +493,34 @@ class Results(SimpleClass):
             img = (self.orig_img[0].detach().permute(1, 2, 0).contiguous() * 255).to(torch.uint8).cpu().numpy()
 
         names = self.names
-        is_obb = self.obb is not None
-        pred_boxes, show_boxes = self.obb if is_obb else self.boxes, boxes
-        pred_masks, show_masks = self.masks, masks
+        pred_boxes, show_boxes = self.boxes, boxes
         pred_probs, show_probs = self.probs, probs
         annotator = Annotator(
             deepcopy(self.orig_img if img is None else img),
-            line_width,
-            font_size,
-            font,
-            pil or (pred_probs is not None and show_probs),  # Classify tasks default to pil=True
+            line_width_percentage=line_width_percentage,
+            font=font,
+            pil=pil or (pred_probs is not None and show_probs),  # Classify tasks default to pil=True
             example=names,
         )
-
-        # Plot Segment results
-        if pred_masks and show_masks:
-            if im_gpu is None:
-                img = LetterBox(pred_masks.shape[1:])(image=annotator.result())
-                im_gpu = (
-                    torch.as_tensor(img, dtype=torch.float16, device=pred_masks.data.device)
-                    .permute(2, 0, 1)
-                    .flip(0)
-                    .contiguous()
-                    / 255
-                )
-            idx = (
-                pred_boxes.id
-                if pred_boxes.id is not None and color_mode == "instance"
-                else pred_boxes.cls
-                if pred_boxes and color_mode == "class"
-                else reversed(range(len(pred_masks)))
-            )
-            annotator.masks(pred_masks.data, colors=[colors(x, True) for x in idx], im_gpu=im_gpu)
 
         # Plot Detect results
         if pred_boxes is not None and show_boxes:
             for i, d in enumerate(reversed(pred_boxes)):
                 c, d_conf, id = int(d.cls), float(d.conf) if conf else None, None if d.id is None else int(d.id.item())
-                name = ("" if id is None else f"id:{id} ") + names[c]
-                label = (f"{name} {d_conf:.2f}" if conf else name) if labels else None
-                box = d.xyxyxyxy.reshape(-1, 4, 2).squeeze() if is_obb else d.xyxy.squeeze()
+                
+                id_prefix = "" if id is None else f"{id} -"
+
+                name = id_prefix + names[c]
+
+                if labels:
+                    if conf:
+                        label = f"{name} | {d_conf:.2f}"
+                    else:
+                        label = name
+                else:
+                    label = None
+
+                box = d.xyxy.squeeze()
                 annotator.box_label(
                     box,
                     label,
@@ -552,24 +534,6 @@ class Results(SimpleClass):
                         else None,
                         True,
                     ),
-                    rotated=is_obb,
-                )
-
-        # Plot Classify results
-        if pred_probs is not None and show_probs:
-            text = ",\n".join(f"{names[j] if names else j} {pred_probs.data[j]:.2f}" for j in pred_probs.top5)
-            x = round(self.orig_shape[0] * 0.03)
-            annotator.text([x, x], text, txt_color=(255, 255, 255))  # TODO: allow setting colors
-
-        # Plot Pose results
-        if self.keypoints is not None:
-            for i, k in enumerate(reversed(self.keypoints.data)):
-                annotator.kpts(
-                    k,
-                    self.orig_shape,
-                    radius=kpt_radius,
-                    kpt_line=kpt_line,
-                    kpt_color=colors(i, True) if color_mode == "instance" else None,
                 )
 
         # Show results
