@@ -8,20 +8,16 @@ import numpy as np
 import torch
 from PIL import Image
 
-from ultralytics.cfg import TASK2DATA, get_cfg, get_save_dir
+from ultralytics.cfg import get_cfg, get_save_dir
 from ultralytics.engine.results import Results
-from ultralytics.nn.tasks import attempt_load_one_weight, guess_model_task, nn, yaml_model_load
+from ultralytics.nn.tasks import attempt_load_one_weight, nn
 from ultralytics.utils import (
-    ARGV,
     ASSETS,
-    DEFAULT_CFG_DICT,
     LOGGER,
-    RANK,
     SETTINGS,
     callbacks,
     checks,
     emojis,
-    yaml_load,
 )
 
 
@@ -84,31 +80,6 @@ class Model(nn.Module):
         task: str = None,
         verbose: bool = False,
     ) -> None:
-        """
-        Initializes a new instance of the YOLO model class.
-
-        This constructor sets up the model based on the provided model path or name. It handles various types of
-        model sources, including local files, Ultralytics HUB models, and Triton Server models. The method
-        initializes several important attributes of the model and prepares it for operations like training,
-        prediction, or export.
-
-        Args:
-            model (Union[str, Path]): Path or name of the model to load or create. Can be a local file path, a
-                model name from Ultralytics HUB, or a Triton Server model.
-            task (str | None): The task type associated with the YOLO model, specifying its application domain.
-            verbose (bool): If True, enables verbose output during the model's initialization and subsequent
-                operations.
-
-        Raises:
-            FileNotFoundError: If the specified model file does not exist or is inaccessible.
-            ValueError: If the model file or configuration is invalid or unsupported.
-            ImportError: If required dependencies for specific model types (like HUB SDK) are not installed.
-
-        Examples:
-            >>> model = Model("yolo11n.pt")
-            >>> model = Model("path/to/model.yaml", task="detect")
-            >>> model = Model("hub_model", verbose=True)
-        """
         super().__init__()
         self.callbacks = callbacks.get_default_callbacks()
         self.predictor = None  # reuse predictor
@@ -134,112 +105,17 @@ class Model(nn.Module):
         stream: bool = False,
         **kwargs,
     ) -> list:
-        """
-        Alias for the predict method, enabling the model instance to be callable for predictions.
-
-        This method simplifies the process of making predictions by allowing the model instance to be called
-        directly with the required arguments.
-
-        Args:
-            source (str | Path | int | PIL.Image | np.ndarray | torch.Tensor | List | Tuple): The source of
-                the image(s) to make predictions on. Can be a file path, URL, PIL image, numpy array, PyTorch
-                tensor, or a list/tuple of these.
-            stream (bool): If True, treat the input source as a continuous stream for predictions.
-            **kwargs (Any): Additional keyword arguments to configure the prediction process.
-
-        Returns:
-            (List[ultralytics.engine.results.Results]): A list of prediction results, each encapsulated in a
-                Results object.
-
-        Examples:
-            >>> model = YOLO("yolo11n.pt")
-            >>> results = model("https://ultralytics.com/images/bus.jpg")
-            >>> for r in results:
-            ...     print(f"Detected {len(r)} objects in image")
-        """
         return self.predict(source, stream, **kwargs)
 
     @staticmethod
     def is_triton_model(model: str) -> bool:
-        """
-        Checks if the given model string is a Triton Server URL.
-
-        This static method determines whether the provided model string represents a valid Triton Server URL by
-        parsing its components using urllib.parse.urlsplit().
-
-        Args:
-            model (str): The model string to be checked.
-
-        Returns:
-            (bool): True if the model string is a valid Triton Server URL, False otherwise.
-
-        Examples:
-            >>> Model.is_triton_model("http://localhost:8000/v2/models/yolov8n")
-            True
-            >>> Model.is_triton_model("yolo11n.pt")
-            False
-        """
         from urllib.parse import urlsplit
 
         url = urlsplit(model)
         return url.netloc and url.path and url.scheme in {"http", "grpc"}
 
 
-    def _new(self, cfg: str, task=None, model=None, verbose=False) -> None:
-        """
-        Initializes a new model and infers the task type from the model definitions.
-
-        This method creates a new model instance based on the provided configuration file. It loads the model
-        configuration, infers the task type if not specified, and initializes the model using the appropriate
-        class from the task map.
-
-        Args:
-            cfg (str): Path to the model configuration file in YAML format.
-            task (str | None): The specific task for the model. If None, it will be inferred from the config.
-            model (torch.nn.Module | None): A custom model instance. If provided, it will be used instead of creating
-                a new one.
-            verbose (bool): If True, displays model information during loading.
-
-        Raises:
-            ValueError: If the configuration file is invalid or the task cannot be inferred.
-            ImportError: If the required dependencies for the specified task are not installed.
-
-        Examples:
-            >>> model = Model()
-            >>> model._new("yolov8n.yaml", task="detect", verbose=True)
-        """
-        cfg_dict = yaml_model_load(cfg)
-        self.cfg = cfg
-        self.task = task or guess_model_task(cfg_dict)
-        self.model = (model or self._smart_load("model"))(cfg_dict, verbose=verbose and RANK == -1)  # build model
-        self.overrides["model"] = self.cfg
-        self.overrides["task"] = self.task
-
-        # Below added to allow export from YAMLs
-        self.model.args = {**DEFAULT_CFG_DICT, **self.overrides}  # combine default and model args (prefer model args)
-        self.model.task = self.task
-        self.model_name = cfg
-
     def _load(self, weights: str, task=None) -> None:
-        """
-        Loads a model from a checkpoint file or initializes it from a weights file.
-
-        This method handles loading models from either .pt checkpoint files or other weight file formats. It sets
-        up the model, task, and related attributes based on the loaded weights.
-
-        Args:
-            weights (str): Path to the model weights file to be loaded.
-            task (str | None): The task associated with the model. If None, it will be inferred from the model.
-
-        Raises:
-            FileNotFoundError: If the specified weights file does not exist or is inaccessible.
-            ValueError: If the weights file format is unsupported or invalid.
-
-        Examples:
-            >>> model = Model()
-            >>> model._load("yolo11n.pt")
-            >>> model._load("path/to/weights.pth", task="detect")
-        """
         if weights.lower().startswith(("https://", "http://", "rtsp://", "rtmp://", "tcp://")):
             weights = checks.check_file(weights, download_dir=SETTINGS["weights_dir"])  # download and return local file
         weights = checks.check_model_file_from_stem(weights)  # add suffix, i.e. yolov8n -> yolov8n.pt
@@ -249,32 +125,10 @@ class Model(nn.Module):
             self.task = self.model.args["task"]
             self.overrides = self.model.args = self._reset_ckpt_args(self.model.args)
             self.ckpt_path = self.model.pt_path
-        else:
-            weights = checks.check_file(weights)  # runs in all cases, not redundant with above call
-            self.model, self.ckpt = weights, None
-            self.task = task or guess_model_task(weights)
-            self.ckpt_path = weights
-        self.overrides["model"] = weights
-        self.overrides["task"] = self.task
+            
         self.model_name = weights
 
     def _check_is_pytorch_model(self) -> None:
-        """
-        Checks if the model is a PyTorch model and raises a TypeError if it's not.
-
-        This method verifies that the model is either a PyTorch module or a .pt file. It's used to ensure that
-        certain operations that require a PyTorch model are only performed on compatible model types.
-
-        Raises:
-            TypeError: If the model is not a PyTorch module or a .pt file. The error message provides detailed
-                information about supported model formats and operations.
-
-        Examples:
-            >>> model = Model("yolo11n.pt")
-            >>> model._check_is_pytorch_model()  # No error raised
-            >>> model = Model("yolov8n.onnx")
-            >>> model._check_is_pytorch_model()  # Raises TypeError
-        """
         pt_str = isinstance(self.model, (str, Path)) and Path(self.model).suffix == ".pt"
         pt_module = isinstance(self.model, nn.Module)
         if not (pt_module or pt_str):
@@ -287,23 +141,6 @@ class Model(nn.Module):
             )
 
     def reset_weights(self) -> "Model":
-        """
-        Resets the model's weights to their initial state.
-
-        This method iterates through all modules in the model and resets their parameters if they have a
-        'reset_parameters' method. It also ensures that all parameters have 'requires_grad' set to True,
-        enabling them to be updated during training.
-
-        Returns:
-            (Model): The instance of the class with reset weights.
-
-        Raises:
-            AssertionError: If the model is not a PyTorch model.
-
-        Examples:
-            >>> model = Model("yolo11n.pt")
-            >>> model.reset_weights()
-        """
         self._check_is_pytorch_model()
         for m in self.model.modules():
             if hasattr(m, "reset_parameters"):
@@ -497,24 +334,20 @@ class Model(nn.Module):
             source = ASSETS
             LOGGER.warning(f"WARNING ⚠️ 'source' is missing. Using 'source={source}'.")
 
-        is_cli = (ARGV[0].endswith("yolo") or ARGV[0].endswith("ultralytics")) and any(
-            x in ARGV for x in ("predict", "track", "mode=predict", "mode=track")
-        )
+        args = {**self.overrides, **kwargs}  # highest priority args on the right
 
-        custom = {"conf": 0.25, "batch": 1, "save": is_cli, "mode": "predict"}  # method defaults
-        args = {**self.overrides, **custom, **kwargs}  # highest priority args on the right
-        prompts = args.pop("prompts", None)  # for SAM-type models
+        print("ARGS:", args)
 
         if not self.predictor:
+            print("ENTRE ACA")
             self.predictor = (predictor or self._smart_load("predictor"))(overrides=args, _callbacks=self.callbacks)
-            self.predictor.setup_model(model=self.model, verbose=is_cli)
+            self.predictor.setup_model(model=self.model)
         else:  # only update args if predictor is already setup
             self.predictor.args = get_cfg(self.predictor.args, args)
             if "project" in args or "name" in args:
                 self.predictor.save_dir = get_save_dir(self.predictor.args)
-        if prompts and hasattr(self.predictor, "set_prompts"):  # for SAM-type models
-            self.predictor.set_prompts(prompts)
-        return self.predictor.predict_cli(source=source) if is_cli else self.predictor(source=source, stream=stream)
+        
+        return self.predictor(source=source, stream=stream)
 
     def track(
         self,
@@ -523,37 +356,6 @@ class Model(nn.Module):
         persist: bool = False,
         **kwargs,
     ) -> List[Results]:
-        """
-        Conducts object tracking on the specified input source using the registered trackers.
-
-        This method performs object tracking using the model's predictors and optionally registered trackers. It handles
-        various input sources such as file paths or video streams, and supports customization through keyword arguments.
-        The method registers trackers if not already present and can persist them between calls.
-
-        Args:
-            source (Union[str, Path, int, List, Tuple, np.ndarray, torch.Tensor], optional): Input source for object
-                tracking. Can be a file path, URL, or video stream.
-            stream (bool): If True, treats the input source as a continuous video stream. Defaults to False.
-            persist (bool): If True, persists trackers between different calls to this method. Defaults to False.
-            **kwargs (Any): Additional keyword arguments for configuring the tracking process.
-
-        Returns:
-            (List[ultralytics.engine.results.Results]): A list of tracking results, each a Results object.
-
-        Raises:
-            AttributeError: If the predictor does not have registered trackers.
-
-        Examples:
-            >>> model = YOLO("yolo11n.pt")
-            >>> results = model.track(source="path/to/video.mp4", show=True)
-            >>> for r in results:
-            ...     print(r.boxes.id)  # print tracking IDs
-
-        Notes:
-            - This method sets a default confidence threshold of 0.1 for ByteTrack-based tracking.
-            - The tracking mode is explicitly set in the keyword arguments.
-            - Batch size is set to 1 for tracking in videos.
-        """
         if not hasattr(self.predictor, "trackers"):
             from ultralytics.trackers import register_tracker
 

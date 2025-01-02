@@ -9,8 +9,8 @@ from ultralytics.nn.tasks import DetectionModel
 class YOLO(Model):
     """YOLO (You Only Look Once) object detection model."""
 
-    def __init__(self, model, task=None, verbose=False):
-        super().__init__(model=model, task=task, verbose=verbose)
+    def __init__(self, task=None, verbose=False):
+        super().__init__(task=task, verbose=verbose)
 
     @property
     def task_map(self):
